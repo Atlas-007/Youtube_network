@@ -11,6 +11,7 @@ This Python script analyzes a YouTube channel's commenters and identifies the **
 - Aggregates the subscriptions of these commenters.
 - Returns the **most common channels** among commenters.
 - Outputs results as a **Pandas DataFrame**.
+- takes the data and makes a visual graph network
 
 ---
 
@@ -39,5 +40,5 @@ pip install -r requirements.txt
 
 ### Note
 
-Currently, the script outputs the most common channels in a table (Pandas DataFrame).  
-In a future version, a **graph/network visualization** will be added to show the relationships between channels.
+to do next:
+In a future version, a GUI will be added to the app and more extensive visualization options.
