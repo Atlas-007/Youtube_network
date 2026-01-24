@@ -15,6 +15,7 @@ def build_youtube_client(api_key: str):
     return build("youtube", "v3", developerKey=api_key)
 
 
+    
 def get_uploads_playlist_id(youtube, channel_id: str) -> Optional[str]:
 
     try:
@@ -40,7 +41,6 @@ def iterate_playlist_video_ids(youtube, playlist_id: str) -> Generator[str, None
             pageToken=next_page_token,
         ).execute()
         for item in resp.get("items", []):
-
             resource = item.get("snippet", {}).get("resourceId", {})
             video_id = resource.get("videoId")
             if video_id:
@@ -126,7 +126,9 @@ def collect_commenters_with_public_subs(
 def get_subscriptions_for_commenter(
     youtube,
     commenter_channel_id: str,
-    max_subscriptions: int = 50
+    max_subscriptions: int = 50,
+    channel_id: str = None,
+    handle: str = None
 ) -> List[Tuple[str, str]]:
 
     results: List[Tuple[str, str]] = []
@@ -171,28 +173,66 @@ def get_subscriptions_for_commenter(
 def aggregate_subscriptions(
     youtube,
     commenters: Set[str],
-    max_subscriptions_per_commenter: int = 50
+    max_subscriptions_per_commenter: int = 50,
+    channel_id: str = None,
+    handle: str = None
 ) -> Counter:
-    """
-    Return a Counter mapping (channel_id, title) -> count across all commenters.
-    """
+
     counter = Counter()
     total = len(commenters)
     for idx, commenter_id in enumerate(commenters, start=1):
-        subs = get_subscriptions_for_commenter(youtube, commenter_id, max_subscriptions_per_commenter)
+        subs = get_subscriptions_for_commenter(youtube, commenter_id, max_subscriptions_per_commenter, channel_id, handle)
         for ch_id, title in subs:
             counter[(ch_id, title)] += 1
         logger.info("[%d/%d] Processed %d subscriptions for commenter %s", idx, total, len(subs), commenter_id)
     return counter
 
 
-def format_top_subscriptions(counter: Counter, num_nodes: int = 10) -> List[Dict]:
+def get_channel_profile_image_map(youtube, channel_ids: List[str]) -> Dict[str, Optional[str]]:
+
+    profile_map: Dict[str, Optional[str]] = {}
+    # process in chunks of 50 (API limit)
+    for i in range(0, len(channel_ids), 50):
+        chunk = channel_ids[i:i+50]
+        try:
+            resp = youtube.channels().list(part="snippet", id=",".join(chunk), maxResults=50).execute()
+        except HttpError as e:
+            logger.warning("Could not fetch channel snippets for profile images: %s", e)
+            continue
+        except Exception as e:
+            logger.debug("Unexpected error fetching channel snippets: %s", e)
+            continue
+
+        for item in resp.get("items", []):
+            cid = item.get("id")
+            snippet = item.get("snippet", {}) or {}
+            thumbnails = snippet.get("thumbnails", {}) or {}
+            # choose best available size (high > medium > default)
+            url = (
+                thumbnails.get("high", {}).get("url")
+                or thumbnails.get("medium", {}).get("url")
+                or thumbnails.get("default", {}).get("url")
+            )
+            profile_map[cid] = url
+    return profile_map
+
+
+def format_top_subscriptions(youtube, counter: Counter, num_nodes: int = 10) -> List[Dict]:
 
     most_common = counter.most_common(num_nodes)
-    return [
-        {"channel_id": ch_id, "title": title, "count": count}
-        for (ch_id, title), count in most_common
-    ]
+    channel_ids = [ch_id for (ch_id, title), count in most_common]
+    profile_map = get_channel_profile_image_map(youtube, channel_ids)
+
+    results = []
+    for (ch_id, title), count in most_common:
+        results.append({
+            "channel_id": ch_id,
+            "title": title,
+            "count": count,
+            "profile_image_url": profile_map.get(ch_id)  # channel avatar URL (may be None)
+        })
+
+    return results
 
 
 def most_common_subscriptions(
@@ -200,7 +240,8 @@ def most_common_subscriptions(
     channel_id: str,
     num_nodes: int = 10,
     max_commenters: int = 50,
-    max_subscriptions: int = 50
+    max_subscriptions: int = 50,
+    handle: str = None
 ) -> List[Dict]:
 
     youtube = build_youtube_client(api_key)
@@ -215,29 +256,59 @@ def most_common_subscriptions(
         logger.warning("No commenters with public subscriptions found.")
         return []
 
-    counter = aggregate_subscriptions(youtube, commenters, max_subscriptions_per_commenter=max_subscriptions)
-    return format_top_subscriptions(counter, num_nodes=num_nodes)
+    counter = aggregate_subscriptions(youtube, commenters, max_subscriptions_per_commenter=max_subscriptions, channel_id=channel_id, handle=handle)
+    return format_top_subscriptions(youtube, counter, num_nodes=num_nodes)
 
 
-if __name__ == "__main__":
 
-    api_key = os.environ.get("YT_API_KEY") # set your YouTube Data API key in environment variable: export YT_API_KEY="your_key_here"
-    if not api_key:
-        raise ValueError("Please set the YT_API_KEY environment variable")
+def get_channel_id_from_handle(api_key, handle: str) -> Optional[str]:
+
+    youtube = build_youtube_client(api_key)
     
-    channel_id = "UCX6OQ3DkcsbYNE6H8uQQuVA"  # MrBeast (example) 
+
+    try:
+        resp = youtube.search().list(
+            part="snippet",
+            q=f"@{handle}",
+            type="channel",
+            maxResults=1
+        ).execute()
+
+        items = resp.get("items", [])
+        if not items:
+            return None
+
+        return items[0]["snippet"]["channelId"]
+
+    except Exception as e:
+        logger.debug("Could not resolve channel ID for handle '@%s': %s", handle, e)
+        return None
+    
+
+
+def DataCollect(api_key, num_nodes, max_commenters, max_subscriptions, handle,):
+
+    handle = handle.lstrip("@")
+    if handle:
+        resolved_id = get_channel_id_from_handle(api_key, handle)
+        if not resolved_id:
+            logger.error("Could not resolve channel ID for handle '@%s'", handle)
+            return []
+        channel_id = resolved_id
+
     results = most_common_subscriptions(
         api_key=api_key,
         channel_id=channel_id,
-        num_nodes=10,
-        max_commenters=100,
-        max_subscriptions=30
+        num_nodes=num_nodes,
+        max_commenters=max_commenters,
+        max_subscriptions=max_subscriptions,
+        handle=handle,
     )
 
     df = pd.DataFrame(results)
 
     print(df)
 
-
+    return results
 
 
