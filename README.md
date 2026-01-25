@@ -3,7 +3,7 @@
 This Python script analyzes a YouTube channel's commenters and identifies the **most common channels** they are subscribed to. Essentially, it creates a "channel network" based on public subscriptions of commenters.
 
 ---
-
+![Graph](images/graph.png)
 ## What it does
 
 - Fetches videos from a channel’s uploads playlist.
