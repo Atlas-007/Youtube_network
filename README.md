@@ -41,4 +41,4 @@ pip install -r requirements.txt
 ### Note
 
 to do next:
-In a future version, a progress bar to the app and more extensive visualization options.
+In a future version, add a progress bar to the app and more extensive visualization options.
