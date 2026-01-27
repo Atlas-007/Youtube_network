@@ -6,12 +6,14 @@ from PIL import Image, ImageTk, ImageDraw
 from io import BytesIO
 import requests
 import math
+import gui
 
-Number_of_Nodes = 50
-Number_of_commenters_pull = 100
-Max_subscriptions_per_commenter = 100
+inputs = gui.launch_gui()
+Number_of_Nodes = inputs["channels"]
+Number_of_commenters_pull = inputs["commenters"]
+Max_subscriptions_per_commenter = inputs["subs_per_com"]
 
-ChannelName = "PewDiePie" # Change to your desired channel name
+ChannelName = inputs["main_channel"] # Change to your desired channel name
 
 api_key = os.environ.get("YT_API_KEY") # set your YouTube Data API key in environment variable: export YT_API_KEY="your_key_here"
 if not api_key:
@@ -76,15 +78,15 @@ nodes = [Node(data) for data in x]
 
 
 
-central = ChannelName
+central_name = ChannelName
 central_node = None
 for node in nodes:
-    if node.title == central:
-        central = node
+    if node.title == central_name:
+        central_node = node
         break
 
-if central is None:
-    central = nodes[0] 
+if central_node is None:
+    central_node = nodes[0] 
 
 
 
